@@ -1,0 +1,40 @@
+
+	
+new Handle:g_hExcludeMaps = INVALID_HANDLE;
+
+
+public OnPluginStart()
+{
+	decl String:excludeMaps[PLATFORM_MAX_PATH];
+	BuildPath(Path_SM, excludeMaps, sizeof(excludeMaps), "configs/maplister_excludes.cfg");
+	
+	g_hExcludeMaps = OpenFile(excludeMaps, "r");
+}
+
+	
+public OnPluginEnd()
+{
+	if (g_hExcludeMaps != INVALID_HANDLE)
+		CloseHandle(g_hExcludeMaps);
+}
+
+
+MapLister(OutputType:type, const String:path[], client, const String:filter[])
+{
+	decl String:fileMap[PLATFORM_MAX_PATH];
+
+	if (g_hExcludeMaps != INVALID_HANDLE)
+	{
+		FileSeek(g_hExcludeMaps, SEEK_SET, 0);
+		
+		while (ReadFileLine(g_hExcludeMaps, fileMap, sizeof(fileMap)))
+		{
+			if (strncmp(fileMap, name, strlen(name)) == 0)
+			{
+				exclude = true;
+				break;
+			}
+		}
+		
+	}
+}

@@ -18,6 +18,8 @@
 * 0.5.12 removed nonfunctional SPRITE_VELOCITY_SCALE
 * 0.5.13b added test invisibility func
 * 0.5.14 removed test functions
+* 0.5.15 - removed banner function, seperated to its own plugin
+* 0.5.16 - cleanup g_EntList on map end
 *
 */
 
@@ -29,7 +31,7 @@
 
 #pragma semicolon 1
 
-#define PLUGIN_VERSION	"0.5.14"
+#define PLUGIN_VERSION	"0.5.16"
 
 
 // These define the text players see in the donator menu
@@ -189,6 +191,15 @@ public OnMapStart()
 	}
 }
 
+// Cleanup 
+public OnMapEnd()
+{
+	for(new i = 1; i <= MaxClients; i++)
+	{
+		g_EntList[i] = 0;
+	}
+}
+
 public OnPostDonatorCheck(iClient)
 {
 	if (!IsPlayerDonator(iClient)) return;
@@ -215,8 +226,8 @@ public OnPostDonatorCheck(iClient)
 			g_iShowSprite[iClient] = StringToInt(szBuffer);
 	}
 	
-	GetDonatorMessage(iClient, szBuffer, sizeof(szBuffer));
-	ShowDonatorMessage(iClient, szBuffer);
+//	GetDonatorMessage(iClient, szBuffer, sizeof(szBuffer));
+//	ShowDonatorMessage(iClient, szBuffer);
 }
 
 public OnClientDisconnect(iClient)
@@ -265,13 +276,15 @@ public Action:SayCallback(iClient, const String:command[], argc)
 	return Plugin_Handled;
 }
 
-public ShowDonatorMessage(iClient, String:message[])
+
+/* public ShowDonatorMessage(iClient, String:message[])
 {
 	SetHudTextParamsEx(-1.0, 0.22, 4.0, g_iTagColor[iClient], {0, 0, 0, 255}, 1, 5.0, 0.15, 0.15);
 	for(new i = 1; i <= MaxClients; i++)
 		if(IsClientInGame(i) && !IsFakeClient(i))
 			ShowSyncHudText(i, g_HudSync, message);
-}
+} */
+
 
 public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
 {
