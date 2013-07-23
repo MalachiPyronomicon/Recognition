@@ -21,6 +21,7 @@
 * 0.5.15 - removed banner function, seperated to its own plugin
 * 0.5.16 - cleanup g_EntList on map end
 * 0.5.17 - move further stuff to seperate Banner plugin
+* 0.5.18 - cleanup on client disconnect
 *
 */
 
@@ -32,7 +33,7 @@
 
 #pragma semicolon 1
 
-#define PLUGIN_VERSION	"0.5.17"
+#define PLUGIN_VERSION	"0.5.18"
 
 
 // These define the text players see in the donator menu
@@ -184,7 +185,10 @@ public OnPostDonatorCheck(iClient)
 
 
 public OnClientDisconnect(iClient)
+{
+	KillSprite(iClient);
 	g_bIsDonator[iClient] = false;
+}
 
 
 public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
@@ -211,7 +215,7 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 		// Weed out non-donators
 		if (!g_bIsDonator[i]) continue;
 		
-		// Respawn dead donators
+		// Weed out dead donators
 		if (!IsPlayerAlive(i)) continue;
 
 		if (g_iShowSprite[i] > 0)
@@ -225,7 +229,7 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 		SetEntityHealth(i, DONATOR_HEALTH_BOOST);
 		
 		// Give player speed boost
-		SetEntPropFloat(i, Prop_Send, "m_flMaxspeed", 400.0);
+//		SetEntPropFloat(i, Prop_Send, "m_flMaxspeed", 400.0);
 		
 	}
 	g_bRoundEnded = true;
@@ -338,8 +342,11 @@ public OnGameFrame()
 		if ((ent = g_EntList[i]) > 0)
 		{
 			if (!IsValidEntity(ent))
+			{
 				g_EntList[i] = 0;
+			}
 			else
+			{
 				if ((ent = EntRefToEntIndex(ent)) > 0)
 				{
 					GetClientEyePosition(i, vOrigin);
@@ -347,6 +354,11 @@ public OnGameFrame()
 					GetEntDataVector(i, gVelocityOffset, vVelocity);
 					TeleportEntity(ent, vOrigin, NULL_VECTOR, vVelocity);				
 				}
+			}
+				
+//			SetEntPropFloat(i, Prop_Send, "m_flMaxspeed", 400.0);
+			SetEntPropFloat(i, Prop_Data, "m_flMaxspeed", 400.0);
+
 		}
 	}
 }
