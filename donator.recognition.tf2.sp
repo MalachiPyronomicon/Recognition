@@ -22,6 +22,7 @@
 * 0.5.16 - cleanup g_EntList on map end
 * 0.5.17 - move further stuff to seperate Banner plugin
 * 0.5.18 - cleanup on client disconnect
+* 0.5.19 - improve cleanup on round start, reset sprite index even if entity is no longer valid, check for class and target names before killing sprite, add debug info
 *
 */
 
@@ -33,12 +34,11 @@
 
 #pragma semicolon 1
 
-#define PLUGIN_VERSION	"0.5.18"
+#define PLUGIN_VERSION	"0.5.19"
 
 
 // These define the text players see in the donator menu
 #define MENUTEXT_DONATOR_SPRITE		"Above-Player Icon"
-
 
 // Health boost amount given to donators on map win
 #define DONATOR_HEALTH_BOOST 1800
@@ -46,6 +46,10 @@
 //Supports multiple sprites
 #define TOTAL_SPRITE_FILES 17
 
+// entity info
+#define SPRITE_ENTITYNAME	"env_sprite_oriented"
+#define SPRITE_TARGETNAME	"donator_spr"
+		
 new gVelocityOffset;
 
 new const String:szSpriteNames[TOTAL_SPRITE_FILES][] =
@@ -195,9 +199,6 @@ public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
 {
 	for(new i = 1; i <= MaxClients; i++)
 	{
-		if (!IsClientInGame(i)) continue;
-		if (!g_bIsDonator[i]) continue;
-
 		KillSprite(i);
 	}
 	g_bRoundEnded = false;
@@ -227,9 +228,6 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 		
 		// Give player health boost
 		SetEntityHealth(i, DONATOR_HEALTH_BOOST);
-		
-		// Give player speed boost
-//		SetEntPropFloat(i, Prop_Send, "m_flMaxspeed", 400.0);
 		
 	}
 	g_bRoundEnded = true;
@@ -301,16 +299,16 @@ stock CreateSprite(iClient, String:sprite[], Float:offset)
 	new Float:vOrigin[3];
 	GetClientAbsOrigin(iClient, vOrigin);
 	vOrigin[2] += offset;
-	new ent = CreateEntityByName("env_sprite_oriented");
+	new ent = CreateEntityByName(SPRITE_ENTITYNAME);
 	if (ent)
 	{
 		DispatchKeyValue(ent, "model", sprite);
-		DispatchKeyValue(ent, "classname", "env_sprite_oriented");
+		DispatchKeyValue(ent, "classname", SPRITE_ENTITYNAME);
 		DispatchKeyValue(ent, "spawnflags", "1");
 		DispatchKeyValue(ent, "scale", "0.1");
 		DispatchKeyValue(ent, "rendermode", "1");
 		DispatchKeyValue(ent, "rendercolor", "255 255 255");
-		DispatchKeyValue(ent, "targetname", "donator_spr");
+		DispatchKeyValue(ent, "targetname", SPRITE_TARGETNAME);
 		DispatchKeyValue(ent, "parentname", szTemp);
 		DispatchSpawn(ent);
 		
@@ -323,9 +321,31 @@ stock CreateSprite(iClient, String:sprite[], Float:offset)
 
 stock KillSprite(iClient)
 {
-	if (g_EntList[iClient] > 0 && IsValidEntity(g_EntList[iClient]))
+	if (g_EntList[iClient] > 0)
 	{
-		AcceptEntityInput(g_EntList[iClient], "kill");
+		if (IsValidEntity(g_EntList[iClient]))
+		{
+			new String:sClassName[64];
+			GetEntityClassname(g_EntList[iClient], sClassName, sizeof(sClassName));
+			
+			// Class name must match
+			if (strcmp(sClassName, SPRITE_ENTITYNAME, false) == 0)
+			{
+			
+				new String:sTargetName[64];
+				GetEntPropString(g_EntList[iClient], Prop_Data, "m_iName", sTargetName, sizeof(sTargetName));
+				
+				// targetname must match
+				if (strcmp(sTargetName, SPRITE_TARGETNAME, false) == 0)
+				{
+					PrintToServer("[DONATOR] Killing Ent: class=%s, name=%s", sClassName, sTargetName);	// DEBUG
+					AcceptEntityInput(g_EntList[iClient], "kill");
+				}
+				
+			}
+
+		}
+		
 		g_EntList[iClient] = 0;
 	}
 }
@@ -356,7 +376,6 @@ public OnGameFrame()
 				}
 			}
 				
-//			SetEntPropFloat(i, Prop_Send, "m_flMaxspeed", 400.0);
 			SetEntPropFloat(i, Prop_Data, "m_flMaxspeed", 400.0);
 
 		}
