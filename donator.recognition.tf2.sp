@@ -24,6 +24,7 @@
 * 0.5.18 - cleanup on client disconnect
 * 0.5.19 - improve cleanup on round start, reset sprite index even if entity is no longer valid, check for class and target names before killing sprite, add debug info
 * 0.5.20 - convert entity indexes to use guaranteed references
+* 0.5.21 - use config (keyvalues) file to load sprite info
 *
 */
 
@@ -39,8 +40,11 @@
 
 
 // DEFINES
+//uncomment to enable DEBUG messages
+//#define DEBUG
+
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.20"
+#define PLUGIN_INFO_VERSION					"0.5.21"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -52,10 +56,7 @@
 #define MENUTEXT_DONATOR_SPRITE				"Above-Player Icon"
 
 // Health boost amount given to donators on map win
-#define DONATOR_HEALTH_BOOST 1800
-
-//Supports multiple sprites
-#define TOTAL_SPRITE_FILES 					17
+#define DONATOR_HEALTH_BOOST 				1800
 
 // entity info
 #define SPRITE_ENTITYNAME					"env_sprite_oriented"
@@ -64,6 +65,11 @@
 #define COOKIENAME_SPRITE					"donator_spriteshow"
 #define COOKIENAME_SPRITE_DESCRIPTION		"Which donator sprite to show."
 
+// KeyValues
+#define PATH_KVFILE_SPRITES					"configs/donator/donator.recognition.tf2.cfg"
+#define KVFILE_SPRITES_ROOT_NAME			"Sprites"
+#define KVFILE_SPRITES_SPRITE_NAME			"name"
+#define KVFILE_SPRITES_PATH_NAME			"file"
 
 
 // GLOBALS
@@ -73,53 +79,10 @@ new g_bIsDonator[MAXPLAYERS + 1];													// Array of players, true if donat
 new bool:g_bRoundEnded;																// Flag = true during after-round
 new Handle:g_SpriteShowCookie = INVALID_HANDLE;										// Cookie to store sprite choice
 new g_iShowSprite[MAXPLAYERS + 1];													// Which sprite to show
-
-new const String:szSpriteNames[TOTAL_SPRITE_FILES][] =
-{
-	"Money Sign",
-	"Money Sign / Cloud",
-	"Eyeball",
-	"Banana",
-	"Pirate Flag",
-	"Royal Crown",
-	"LOL Face",
-	"Monkey w/ Banana",
-	"Light Bulb",
-	"Smiley Face",
-	"Heart",
-	"Doggy Snoozing",
-	"Stop Sign",
-	"Umbrella",
-	"Whale",
-	"!",
-	"Nyan Cat"
-};
-
-
-//NOTE: Path to the filename ONLY (vtf/vmt added in plugin)
-new const String:szSpriteFiles[TOTAL_SPRITE_FILES][] = 
-{
-	"materials/custom/ngc/ngc01",
-	"materials/custom/ngc/ngc02",
-	"materials/custom/ngc/ngc03",
-	"materials/custom/ngc/ngc04",
-	"materials/custom/ngc/ngc05",
-	"materials/custom/ngc/ngc06",
-	"materials/custom/ngc/ngc07",
-	"materials/custom/ngc/ngc08",
-//	"materials/custom/ngc/ngc09",
-	"materials/custom/ngc/ngc18",
-	"materials/custom/ngc/ngc10",
-//	"materials/custom/ngc/ngc11",
-	"materials/custom/ngc/ngc17",
-	"materials/custom/ngc/ngc12",
-	"materials/custom/ngc/ngc13",
-//	"materials/custom/ngc/ngc14",
-	"materials/custom/ngc/ngc19",
-	"materials/custom/ngc/ngc15",
-	"materials/custom/ngc/ngc16",
-	"materials/custom/ngc/ngc20"
-};
+new gTotalSpriteFiles = 0;															// ?
+new String:g_sSpritesPath[PLATFORM_MAX_PATH];
+new Handle:g_SpriteNameList = INVALID_HANDLE;
+new Handle:g_SpritePathList = INVALID_HANDLE;
 
 
 // Info
@@ -149,6 +112,14 @@ public OnPluginStart()
 	g_SpriteShowCookie = RegClientCookie(COOKIENAME_SPRITE, COOKIENAME_SPRITE_DESCRIPTION, CookieAccess_Private);
 	
 	gVelocityOffset = FindSendPropInfo("CBasePlayer", "m_vecVelocity[0]");
+
+	//Build SM Path 
+	BuildPath(Path_SM, g_sSpritesPath, sizeof(g_sSpritesPath), PATH_KVFILE_SPRITES); 
+
+	// Create global-dynamic arrays
+	new arraySize = ByteCountToCells(PLATFORM_MAX_PATH);
+	g_SpriteNameList = CreateArray(arraySize);
+	g_SpritePathList = CreateArray(arraySize);
 }
 
 
@@ -163,16 +134,51 @@ public OnAllPluginsLoaded()
 
 public OnMapStart()
 {
-	decl String:szBuffer[128];
-	for (new i = 0; i < TOTAL_SPRITE_FILES; i++)
+	gTotalSpriteFiles = 0;
+
+	new Handle:kvSprites = CreateKeyValues(KVFILE_SPRITES_ROOT_NAME);
+	FileToKeyValues(kvSprites, g_sSpritesPath);
+
+	if (!KvGotoFirstSubKey(kvSprites))
 	{
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", szSpriteFiles[i]);
-		PrecacheGeneric(szBuffer, true);
-		AddFileToDownloadsTable(szBuffer);
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", szSpriteFiles[i]);
-		PrecacheGeneric(szBuffer, true);
-		AddFileToDownloadsTable(szBuffer);
+		SetFailState("%s Unable to load file: %s", PLUGIN_PRINT_NAME, PATH_KVFILE_SPRITES);
 	}
+
+	decl String:szBuffer[128];
+	decl String:sSectionName[64];
+	decl String:sSpriteName[255];
+	decl String:sSpritePath[255];
+
+	do
+	{
+		KvGetSectionName(kvSprites, sSectionName, sizeof(sSectionName));    
+		KvGetString(kvSprites, KVFILE_SPRITES_SPRITE_NAME, sSpriteName, sizeof(sSpriteName));
+		KvGetString(kvSprites, KVFILE_SPRITES_PATH_NAME, sSpritePath, sizeof(sSpritePath));
+
+		#if defined DEBUG
+			PrintToServer ("%s DEBUG - sprite name = %s; sprite path name = %s", PLUGIN_PRINT_NAME, sSpriteName, sSpritePath);
+		#endif
+		
+         // Add each path to the download table/precache.
+		FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sSpritePath);
+		PrecacheGeneric(szBuffer, true);
+		AddFileToDownloadsTable(szBuffer);
+		FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sSpritePath);
+		PrecacheGeneric(szBuffer, true);
+		AddFileToDownloadsTable(szBuffer);
+
+		PushArrayString(g_SpriteNameList, sSpriteName);
+		PushArrayString(g_SpritePathList, sSpritePath);
+		
+		gTotalSpriteFiles++;
+    } while (KvGotoNextKey(kvSprites));
+	
+	#if defined DEBUG
+		PrintToServer ("%s DEBUG - # of sprites found = %d", PLUGIN_PRINT_NAME, gTotalSpriteFiles);
+		PrintToServer ("%s DEBUG - name array size = %d, path array size = %d", PLUGIN_PRINT_NAME, GetArraySize(g_SpriteNameList), GetArraySize(g_SpritePathList));
+	#endif
+
+    CloseHandle(kvSprites);  
 }
 
 
@@ -235,6 +241,7 @@ public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
 public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 {	
 	decl String:szBuffer[128];
+	decl String:sTemp[128];
 	for(new i = 1; i <= MaxClients; i++)
 	{
 		// Weed out Observers and Not-In-Game
@@ -248,15 +255,19 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 
 		if (g_iShowSprite[i] > 0)
 		{
-			if (g_iShowSprite[i] > TOTAL_SPRITE_FILES)
+			if (g_iShowSprite[i] > gTotalSpriteFiles)
 			{
-//				g_iShowSprite[i] = TOTAL_SPRITE_FILES - 1;
 				LogError ("%s ERROR - Sprite index out of bounds.", PLUGIN_PRINT_NAME);
 			}
 			else
 			{
-				FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", szSpriteFiles[g_iShowSprite[i]-1]);
+				GetArrayString(g_SpritePathList, g_iShowSprite[i]-1, sTemp, sizeof(sTemp));
+				FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
 				CreateSprite(i, szBuffer, 25.0);
+
+				#if defined DEBUG
+					PrintToServer ("%s DEBUG - created sprite #%d:%s", PLUGIN_PRINT_NAME, g_iShowSprite[i]-1, szBuffer);
+				#endif
 			}
 		}
 		
@@ -286,6 +297,7 @@ public DonatorMenu:SpriteControlCallback(iClient) Panel_SpriteControl(iClient);
 
 public Action:Panel_SpriteControl(iClient)
 {
+	decl String:sTemp[128];
 	new Handle:menu = CreateMenu(SpriteControlSelected);
 	SetMenuTitle(menu,"Donator: Sprite Control:");
 	
@@ -294,14 +306,26 @@ public Action:Panel_SpriteControl(iClient)
 	else
 		AddMenuItem(menu, "0", "Disable Sprite", ITEMDRAW_DISABLED);
 	
-	decl String:szItem[4];
-	for (new i = 0; i < TOTAL_SPRITE_FILES; i++)
+	decl String:szItem[16];
+	for (new i = 0; i < gTotalSpriteFiles; i++)
 	{
-		FormatEx(szItem, sizeof(szItem), "%i", i+1);	//need to offset the menu items by one since we added the enable / disable outside of the loop
+//		Format(szItem, sizeof(szItem), "%i", i+1);	//need to offset the menu items by one since we added the enable / disable outside of the loop
+		IntToString(i+1, szItem, sizeof(szItem));
+
+		GetArrayString(g_SpriteNameList, i, sTemp, sizeof(sTemp));
+
 		if (g_iShowSprite[iClient]-1 != i)
-			AddMenuItem(menu, szItem, szSpriteNames[i], ITEMDRAW_DEFAULT);
+		{
+			AddMenuItem(menu, szItem, sTemp, ITEMDRAW_DEFAULT);
+		}
 		else
-			AddMenuItem(menu, szItem, szSpriteNames[i],ITEMDRAW_DISABLED);
+		{
+			AddMenuItem(menu, szItem, sTemp,ITEMDRAW_DISABLED);
+		}
+		
+		#if defined DEBUG
+			PrintToServer ("%s DEBUG - created menu item #%s:%s", PLUGIN_PRINT_NAME, szItem, sTemp);
+		#endif
 	}
 	DisplayMenu(menu, iClient, 20);
 }
