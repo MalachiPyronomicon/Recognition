@@ -23,9 +23,12 @@
 * 0.5.17 - move further stuff to seperate Banner plugin
 * 0.5.18 - cleanup on client disconnect
 * 0.5.19 - improve cleanup on round start, reset sprite index even if entity is no longer valid, check for class and target names before killing sprite, add debug info
+* 0.5.20 - convert entity indexes to use guaranteed references
 *
 */
 
+
+// INCLUDES
 #include <sourcemod>
 #include <sdktools>
 #include <tf2>
@@ -34,23 +37,42 @@
 
 #pragma semicolon 1
 
-#define PLUGIN_VERSION	"0.5.19"
 
+// DEFINES
+// Plugin Info
+#define PLUGIN_INFO_VERSION					"0.5.20"
+#define PLUGIN_INFO_NAME					"Donator Recognition"
+#define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
+#define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
+#define PLUGIN_INFO_URL_OLD					"http://www.lolsup.com/tf2"
+#define PLUGIN_INFO_URL						"http://www.necrophix.com/"
+#define PLUGIN_PRINT_NAME					"[Recognition]"							// Used for self-identification in chat/logging
 
 // These define the text players see in the donator menu
-#define MENUTEXT_DONATOR_SPRITE		"Above-Player Icon"
+#define MENUTEXT_DONATOR_SPRITE				"Above-Player Icon"
 
 // Health boost amount given to donators on map win
 #define DONATOR_HEALTH_BOOST 1800
 
 //Supports multiple sprites
-#define TOTAL_SPRITE_FILES 17
+#define TOTAL_SPRITE_FILES 					17
 
 // entity info
-#define SPRITE_ENTITYNAME	"env_sprite_oriented"
-#define SPRITE_TARGETNAME	"donator_spr"
-		
-new gVelocityOffset;
+#define SPRITE_ENTITYNAME					"env_sprite_oriented"
+#define SPRITE_TARGETNAME					"donator_spr"
+
+#define COOKIENAME_SPRITE					"donator_spriteshow"
+#define COOKIENAME_SPRITE_DESCRIPTION		"Which donator sprite to show."
+
+
+
+// GLOBALS
+new gVelocityOffset;																// ?
+new g_SpriteEntityReference[MAXPLAYERS + 1] = {INVALID_ENT_REFERENCE, ...};			// Array of players, sprite entity guaranteed reference
+new g_bIsDonator[MAXPLAYERS + 1];													// Array of players, true if donator
+new bool:g_bRoundEnded;																// Flag = true during after-round
+new Handle:g_SpriteShowCookie = INVALID_HANDLE;										// Cookie to store sprite choice
+new g_iShowSprite[MAXPLAYERS + 1];													// Which sprite to show
 
 new const String:szSpriteNames[TOTAL_SPRITE_FILES][] =
 {
@@ -100,27 +122,23 @@ new const String:szSpriteFiles[TOTAL_SPRITE_FILES][] =
 };
 
 
-new g_EntList[MAXPLAYERS + 1];
-new g_bIsDonator[MAXPLAYERS + 1];
-new bool:g_bRoundEnded;
-new Handle:g_SpriteShowCookie = INVALID_HANDLE;
-
-new g_iShowSprite[MAXPLAYERS + 1];
-
-
+// Info
 public Plugin:myinfo = 
 {
-	name = "Donator Recognition",
-	author = "Nut",
-	description = "Give donators the recognition they deserve.",
-	version = PLUGIN_VERSION,
-	url = "http://www.lolsup.com/tf2"
+	name = PLUGIN_INFO_NAME,
+	author = PLUGIN_INFO_AUTHOR,
+	description = PLUGIN_INFO_DESCRIPTION,
+	version = PLUGIN_INFO_VERSION,
+	url = PLUGIN_INFO_URL
 }
 
 
 public OnPluginStart()
 {
-	CreateConVar("basicdonator_recog_v", PLUGIN_VERSION, "Donator Recognition Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	// Advertise our presence...
+	PrintToServer("%s v%s Plugin start...", PLUGIN_PRINT_NAME, PLUGIN_INFO_VERSION);
+
+	CreateConVar("basicdonator_recog_v", PLUGIN_INFO_VERSION, "Donator Recognition Version", FCVAR_PLUGIN|FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
 	
 	HookEventEx("teamplay_round_start", hook_Start, EventHookMode_PostNoCopy);
 	HookEventEx("arena_round_start", hook_Start, EventHookMode_PostNoCopy);
@@ -128,7 +146,7 @@ public OnPluginStart()
 	HookEventEx("arena_win_panel", hook_Win, EventHookMode_PostNoCopy);
 	HookEventEx("player_death", event_player_death, EventHookMode_Post);
 	
-	g_SpriteShowCookie = RegClientCookie("donator_spriteshow", "Which donator sprite to show.", CookieAccess_Private);
+	g_SpriteShowCookie = RegClientCookie(COOKIENAME_SPRITE, COOKIENAME_SPRITE_DESCRIPTION, CookieAccess_Private);
 	
 	gVelocityOffset = FindSendPropInfo("CBasePlayer", "m_vecVelocity[0]");
 }
@@ -163,7 +181,7 @@ public OnMapEnd()
 {
 	for(new i = 1; i <= MaxClients; i++)
 	{
-		g_EntList[i] = 0;
+		g_SpriteEntityReference[i] = INVALID_ENT_REFERENCE;
 	}
 }
 
@@ -172,17 +190,26 @@ public OnPostDonatorCheck(iClient)
 {
 	new String:szBuffer[256];
 
-	if (!IsPlayerDonator(iClient)) return;
-	
-	g_bIsDonator[iClient] = true;
-	g_iShowSprite[iClient] = 1;
-	
-	if (AreClientCookiesCached(iClient))
-	{		
-		GetClientCookie(iClient, g_SpriteShowCookie, szBuffer, sizeof(szBuffer));
+	if (!IsPlayerDonator(iClient))
+	{
+		return;
+	}
+	else
+	{	
+		g_bIsDonator[iClient] = true;
 		
-		if (strlen(szBuffer) > 0)
-			g_iShowSprite[iClient] = StringToInt(szBuffer);
+		// Only used if cookie not already set
+		g_iShowSprite[iClient] = 1;
+		
+		if (AreClientCookiesCached(iClient))
+		{		
+			GetClientCookie(iClient, g_SpriteShowCookie, szBuffer, sizeof(szBuffer));
+			
+			if (strlen(szBuffer) > 0)
+			{
+				g_iShowSprite[iClient] = StringToInt(szBuffer);
+			}
+		}
 	}
 	
 }
@@ -197,7 +224,7 @@ public OnClientDisconnect(iClient)
 
 public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
 {
-	for(new i = 1; i <= MaxClients; i++)
+	for(new i = 0; i <= MaxClients; i++)
 	{
 		KillSprite(i);
 	}
@@ -221,9 +248,16 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 
 		if (g_iShowSprite[i] > 0)
 		{
-			if (g_iShowSprite[i] > TOTAL_SPRITE_FILES) g_iShowSprite[i] = TOTAL_SPRITE_FILES - 1;
-			FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", szSpriteFiles[g_iShowSprite[i]-1]);
-			CreateSprite(i, szBuffer, 25.0);
+			if (g_iShowSprite[i] > TOTAL_SPRITE_FILES)
+			{
+//				g_iShowSprite[i] = TOTAL_SPRITE_FILES - 1;
+				LogError ("%s ERROR - Sprite index out of bounds.", PLUGIN_PRINT_NAME);
+			}
+			else
+			{
+				FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", szSpriteFiles[g_iShowSprite[i]-1]);
+				CreateSprite(i, szBuffer, 25.0);
+			}
 		}
 		
 		// Give player health boost
@@ -236,7 +270,11 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 
 public Action:event_player_death(Handle:event, const String:name[], bool:dontBroadcast)
 {
-	if(!g_bRoundEnded) return Plugin_Continue;
+	if(!g_bRoundEnded) 
+	{
+		return Plugin_Continue;
+	}
+	
 	KillSprite(GetClientOfUserId(GetEventInt(event, "userid")));
 
 	return Plugin_Continue;
@@ -292,7 +330,8 @@ public SpriteControlSelected(Handle:menu, MenuAction:action, param1, param2)
 
 stock CreateSprite(iClient, String:sprite[], Float:offset)
 {
-	new String:szTemp[64]; 
+	new String:szTemp[64];
+	
 	Format(szTemp, sizeof(szTemp), "client%i", iClient);
 	DispatchKeyValue(iClient, "targetname", szTemp);
 
@@ -300,84 +339,95 @@ stock CreateSprite(iClient, String:sprite[], Float:offset)
 	GetClientAbsOrigin(iClient, vOrigin);
 	vOrigin[2] += offset;
 	new ent = CreateEntityByName(SPRITE_ENTITYNAME);
-	if (ent)
+	
+	if (IsValidEntity(ent))
 	{
-		DispatchKeyValue(ent, "model", sprite);
-		DispatchKeyValue(ent, "classname", SPRITE_ENTITYNAME);
-		DispatchKeyValue(ent, "spawnflags", "1");
-		DispatchKeyValue(ent, "scale", "0.1");
-		DispatchKeyValue(ent, "rendermode", "1");
-		DispatchKeyValue(ent, "rendercolor", "255 255 255");
-		DispatchKeyValue(ent, "targetname", SPRITE_TARGETNAME);
-		DispatchKeyValue(ent, "parentname", szTemp);
-		DispatchSpawn(ent);
-		
-		TeleportEntity(ent, vOrigin, NULL_VECTOR, NULL_VECTOR);
+		g_SpriteEntityReference[iClient] = EntIndexToEntRef(ent);
 
-		g_EntList[iClient] = ent;
+		if(GetEntityCount() < GetMaxEntities()-32)
+		{
+			DispatchKeyValue(ent, "model", sprite);
+			DispatchKeyValue(ent, "classname", SPRITE_ENTITYNAME);
+			DispatchKeyValue(ent, "spawnflags", "1");
+			DispatchKeyValue(ent, "scale", "0.1");
+			DispatchKeyValue(ent, "rendermode", "1");
+			DispatchKeyValue(ent, "rendercolor", "255 255 255");
+//			DispatchKeyValue(ent, "targetname", SPRITE_TARGETNAME);
+//			DispatchKeyValue(ent, "parentname", szTemp);
+			DispatchSpawn(ent);
+			
+			TeleportEntity(ent, vOrigin, NULL_VECTOR, NULL_VECTOR);
+		}
+		else
+		{
+			LogError ("%s ERROR - Unable to create sprite, maxEntities reached.", PLUGIN_PRINT_NAME);
+		}
+
+	}
+	else
+	{
+		LogError ("%s ERROR - Unable to create sprite, entity not valid.", PLUGIN_PRINT_NAME);
 	}
 }
 
 
 stock KillSprite(iClient)
 {
-	if (g_EntList[iClient] > 0)
+	new index = EntRefToEntIndex(g_SpriteEntityReference[iClient]);
+	 
+	if (index == INVALID_ENT_REFERENCE)
 	{
-		if (IsValidEntity(g_EntList[iClient]))
-		{
-			new String:sClassName[64];
-			GetEntityClassname(g_EntList[iClient], sClassName, sizeof(sClassName));
-			
-			// Class name must match
-			if (strcmp(sClassName, SPRITE_ENTITYNAME, false) == 0)
-			{
-			
-				new String:sTargetName[64];
-				GetEntPropString(g_EntList[iClient], Prop_Data, "m_iName", sTargetName, sizeof(sTargetName));
-				
-				// targetname must match
-				if (strcmp(sTargetName, SPRITE_TARGETNAME, false) == 0)
-				{
-					PrintToServer("[DONATOR] Killing Ent: class=%s, name=%s", sClassName, sTargetName);	// DEBUG
-					AcceptEntityInput(g_EntList[iClient], "kill");
-				}
-				
-			}
-
-		}
-		
-		g_EntList[iClient] = 0;
+		PrintToServer ("%s CATCH - Entity no longer exists.", PLUGIN_PRINT_NAME);
 	}
+	else
+	{
+		if (IsValidEntity(index))
+		{
+			PrintToServer ("%s Entity deleted.", PLUGIN_PRINT_NAME);
+			AcceptEntityInput(index, "kill");
+		}
+		else
+		{
+			PrintToServer ("%s CATCH - Entity exists but not valid.", PLUGIN_PRINT_NAME);
+		}
+	}
+
+	// Invalidate 
+	g_SpriteEntityReference[iClient] = INVALID_ENT_REFERENCE;
 }
 
 
 public OnGameFrame()
 {
-	if (!g_bRoundEnded) return;
-	new ent, Float:vOrigin[3], Float:vVelocity[3];
+	if (!g_bRoundEnded) 
+	{
+		return;
+	}
 	
+	new ent = INVALID_ENT_REFERENCE;
+	new Float:vOrigin[3];
+	new Float:vVelocity[3];
+	
+	// For each player slot
+	// Start at 1 to skip console
 	for(new i = 1; i <= MaxClients; i++)
 	{
-		if (!IsClientInGame(i)) continue;
-		if ((ent = g_EntList[i]) > 0)
+		if (!IsClientInGame(i))
 		{
-			if (!IsValidEntity(ent))
-			{
-				g_EntList[i] = 0;
-			}
-			else
-			{
-				if ((ent = EntRefToEntIndex(ent)) > 0)
-				{
-					GetClientEyePosition(i, vOrigin);
-					vOrigin[2] += 25.0;
-					GetEntDataVector(i, gVelocityOffset, vVelocity);
-					TeleportEntity(ent, vOrigin, NULL_VECTOR, vVelocity);				
-				}
-			}
-				
+			continue;
+		}
+		
+		if (g_SpriteEntityReference[i] != INVALID_ENT_REFERENCE)
+		{
+			ent = EntRefToEntIndex(g_SpriteEntityReference[i]);
+			
+			GetClientEyePosition(i, vOrigin);
+			vOrigin[2] += 25.0;
+			GetEntDataVector(i, gVelocityOffset, vVelocity);
+			TeleportEntity(ent, vOrigin, NULL_VECTOR, vVelocity);				
+			
+			// Buff player speed
 			SetEntPropFloat(i, Prop_Data, "m_flMaxspeed", 400.0);
-
 		}
 	}
 }
