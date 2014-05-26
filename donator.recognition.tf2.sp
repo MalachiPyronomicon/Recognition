@@ -25,6 +25,7 @@
 * 0.5.19 - improve cleanup on round start, reset sprite index even if entity is no longer valid, check for class and target names before killing sprite, add debug info
 * 0.5.20 - convert entity indexes to use guaranteed references
 * 0.5.21 - use config (keyvalues) file to load sprite info
+* 0.5.22 - bug: didnt clear arrays
 *
 */
 
@@ -44,7 +45,7 @@
 //#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.21"
+#define PLUGIN_INFO_VERSION					"0.5.22"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -136,6 +137,10 @@ public OnMapStart()
 {
 	gTotalSpriteFiles = 0;
 
+	// clear arrays
+	ClearArray(g_SpriteNameList);
+	ClearArray(g_SpritePathList);
+	
 	new Handle:kvSprites = CreateKeyValues(KVFILE_SPRITES_ROOT_NAME);
 	FileToKeyValues(kvSprites, g_sSpritesPath);
 
