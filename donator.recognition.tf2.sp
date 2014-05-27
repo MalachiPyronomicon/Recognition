@@ -26,6 +26,7 @@
 * 0.5.20 - convert entity indexes to use guaranteed references
 * 0.5.21 - use config (keyvalues) file to load sprite info
 * 0.5.22 - bug: didnt clear arrays
+* 0.5.23 - include offsets, add error handling to kv file read
 *
 */
 
@@ -42,10 +43,10 @@
 
 // DEFINES
 //uncomment to enable DEBUG messages
-//#define DEBUG
+#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.22"
+#define PLUGIN_INFO_VERSION					"0.5.23r"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -61,7 +62,6 @@
 
 // entity info
 #define SPRITE_ENTITYNAME					"env_sprite_oriented"
-#define SPRITE_TARGETNAME					"donator_spr"
 
 #define COOKIENAME_SPRITE					"donator_spriteshow"
 #define COOKIENAME_SPRITE_DESCRIPTION		"Which donator sprite to show."
@@ -69,8 +69,12 @@
 // KeyValues
 #define PATH_KVFILE_SPRITES					"configs/donator/donator.recognition.tf2.cfg"
 #define KVFILE_SPRITES_ROOT_NAME			"Sprites"
+#define KVFILE_SPRITES_SECTION_NAME			"Sprite"
 #define KVFILE_SPRITES_SPRITE_NAME			"name"
 #define KVFILE_SPRITES_PATH_NAME			"file"
+#define KVFILE_SPRITES_XOFFSET_NAME			"xoffset"
+#define KVFILE_SPRITES_YOFFSET_NAME			"yoffset"
+#define KVFILE_SPRITES_ZOFFSET_NAME			"zoffset"
 
 
 // GLOBALS
@@ -82,8 +86,11 @@ new Handle:g_SpriteShowCookie = INVALID_HANDLE;										// Cookie to store spri
 new g_iShowSprite[MAXPLAYERS + 1];													// Which sprite to show
 new gTotalSpriteFiles = 0;															// ?
 new String:g_sSpritesPath[PLATFORM_MAX_PATH];
-new Handle:g_SpriteNameList = INVALID_HANDLE;
-new Handle:g_SpritePathList = INVALID_HANDLE;
+new Handle:g_SpriteNameList = INVALID_HANDLE;										// global, dynamic array
+new Handle:g_SpritePathList = INVALID_HANDLE;										// global, dynamic array
+new Handle:g_SpriteXOffset = INVALID_HANDLE;										// global, dynamic array
+new Handle:g_SpriteYOffset = INVALID_HANDLE;										// global, dynamic array
+new Handle:g_SpriteZOffset = INVALID_HANDLE;										// global, dynamic array
 
 
 // Info
@@ -121,6 +128,11 @@ public OnPluginStart()
 	new arraySize = ByteCountToCells(PLATFORM_MAX_PATH);
 	g_SpriteNameList = CreateArray(arraySize);
 	g_SpritePathList = CreateArray(arraySize);
+	
+	
+	g_SpriteXOffset = CreateArray(1);
+	g_SpriteYOffset = CreateArray(1);
+	g_SpriteZOffset = CreateArray(1);
 }
 
 
@@ -135,11 +147,15 @@ public OnAllPluginsLoaded()
 
 public OnMapStart()
 {
+	new ErrorCount = 0;
 	gTotalSpriteFiles = 0;
 
 	// clear arrays
 	ClearArray(g_SpriteNameList);
 	ClearArray(g_SpritePathList);
+	ClearArray(g_SpriteXOffset);
+	ClearArray(g_SpriteYOffset);
+	ClearArray(g_SpriteZOffset);
 	
 	new Handle:kvSprites = CreateKeyValues(KVFILE_SPRITES_ROOT_NAME);
 	FileToKeyValues(kvSprites, g_sSpritesPath);
@@ -153,37 +169,77 @@ public OnMapStart()
 	decl String:sSectionName[64];
 	decl String:sSpriteName[255];
 	decl String:sSpritePath[255];
+	decl Float:fSpriteXOffset;
+	decl Float:fSpriteYOffset;
+	decl Float:fSpriteZOffset;
 
 	do
 	{
 		KvGetSectionName(kvSprites, sSectionName, sizeof(sSectionName));    
-		KvGetString(kvSprites, KVFILE_SPRITES_SPRITE_NAME, sSpriteName, sizeof(sSpriteName));
-		KvGetString(kvSprites, KVFILE_SPRITES_PATH_NAME, sSpritePath, sizeof(sSpritePath));
+		if (strcmp(sSectionName, KVFILE_SPRITES_SECTION_NAME, true) == 0)
+		{
+			KvGetString(kvSprites, KVFILE_SPRITES_SPRITE_NAME, sSpriteName, sizeof(sSpriteName));
+			KvGetString(kvSprites, KVFILE_SPRITES_PATH_NAME, sSpritePath, sizeof(sSpritePath));
+			
+			fSpriteXOffset = KvGetFloat(kvSprites, KVFILE_SPRITES_XOFFSET_NAME, -999.9);
+			if ( fSpriteXOffset == -999.9 )
+			{
+				ErrorCount++;
+				PrintToServer ("%s ERROR - Unable to get X Offset = %1.1f", PLUGIN_PRINT_NAME, fSpriteXOffset);
+			}
+			
+			fSpriteYOffset = KvGetFloat(kvSprites, KVFILE_SPRITES_YOFFSET_NAME, -999.9);
+			if ( fSpriteYOffset == -999.9 )
+			{
+				ErrorCount++;
+				PrintToServer ("%s ERROR - Unable to get Y Offset = %1.1f", PLUGIN_PRINT_NAME, fSpriteYOffset);
+			}
+			
+			fSpriteZOffset = KvGetFloat(kvSprites, KVFILE_SPRITES_ZOFFSET_NAME, -999.9);
+			if ( fSpriteZOffset == -999.9 )
+			{
+				ErrorCount++;
+				PrintToServer ("%s ERROR - Unable to get Z Offset = %1.1f", PLUGIN_PRINT_NAME, fSpriteZOffset);
+			}
+			
+			#if defined DEBUG
+				PrintToServer ("%s DEBUG - sprite: name = %s; path  = %s; offset = %1.1f, %1.1f, %1.1f", PLUGIN_PRINT_NAME, sSpriteName, sSpritePath, fSpriteXOffset, fSpriteYOffset, fSpriteZOffset);
+			#endif
+			
+			 // Add each path to the download table/precache.
+			FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sSpritePath);
+			PrecacheGeneric(szBuffer, true);
+			AddFileToDownloadsTable(szBuffer);
+			FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sSpritePath);
+			PrecacheGeneric(szBuffer, true);
+			AddFileToDownloadsTable(szBuffer);
 
-		#if defined DEBUG
-			PrintToServer ("%s DEBUG - sprite name = %s; sprite path name = %s", PLUGIN_PRINT_NAME, sSpriteName, sSpritePath);
-		#endif
-		
-         // Add each path to the download table/precache.
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sSpritePath);
-		PrecacheGeneric(szBuffer, true);
-		AddFileToDownloadsTable(szBuffer);
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sSpritePath);
-		PrecacheGeneric(szBuffer, true);
-		AddFileToDownloadsTable(szBuffer);
-
-		PushArrayString(g_SpriteNameList, sSpriteName);
-		PushArrayString(g_SpritePathList, sSpritePath);
-		
-		gTotalSpriteFiles++;
+			PushArrayString(g_SpriteNameList, sSpriteName);
+			PushArrayString(g_SpritePathList, sSpritePath);
+			PushArrayCell(g_SpriteXOffset, fSpriteXOffset);
+			PushArrayCell(g_SpriteYOffset, fSpriteYOffset);
+			PushArrayCell(g_SpriteZOffset, fSpriteZOffset);
+			
+			gTotalSpriteFiles++;
+		}
+		else
+		{
+			#if defined DEBUG
+				PrintToServer ("%s DEBUG - Unknown section name  = %s, skipping...", PLUGIN_PRINT_NAME, sSectionName);
+			#endif
+		}
     } while (KvGotoNextKey(kvSprites));
 	
 	#if defined DEBUG
-		PrintToServer ("%s DEBUG - # of sprites found = %d", PLUGIN_PRINT_NAME, gTotalSpriteFiles);
-		PrintToServer ("%s DEBUG - name array size = %d, path array size = %d", PLUGIN_PRINT_NAME, GetArraySize(g_SpriteNameList), GetArraySize(g_SpritePathList));
+		PrintToServer ("%s DEBUG - # of sprites found = %d, name array size = %d, path array size = %d", PLUGIN_PRINT_NAME, gTotalSpriteFiles, GetArraySize(g_SpriteNameList), GetArraySize(g_SpritePathList));
 	#endif
 
-    CloseHandle(kvSprites);  
+	CloseHandle(kvSprites);
+
+	if (ErrorCount > 0)
+	{
+		SetFailState("%s %d errors trying to load file: %s", PLUGIN_PRINT_NAME, ErrorCount, PATH_KVFILE_SPRITES);
+	}
 }
 
 
@@ -245,8 +301,6 @@ public hook_Start(Handle:event, const String:name[], bool:dontBroadcast)
 
 public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 {	
-	decl String:szBuffer[128];
-	decl String:sTemp[128];
 	for(new i = 1; i <= MaxClients; i++)
 	{
 		// Weed out Observers and Not-In-Game
@@ -266,13 +320,7 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 			}
 			else
 			{
-				GetArrayString(g_SpritePathList, g_iShowSprite[i]-1, sTemp, sizeof(sTemp));
-				FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
-				CreateSprite(i, szBuffer, 25.0);
-
-				#if defined DEBUG
-					PrintToServer ("%s DEBUG - created sprite #%d:%s", PLUGIN_PRINT_NAME, g_iShowSprite[i]-1, szBuffer);
-				#endif
+				CreateSprite(i);
 			}
 		}
 		
@@ -304,7 +352,7 @@ public Action:Panel_SpriteControl(iClient)
 {
 	decl String:sTemp[128];
 	new Handle:menu = CreateMenu(SpriteControlSelected);
-	SetMenuTitle(menu,"Donator: Sprite Control:");
+	SetMenuTitle(menu,"Donator: Above-head Icon:");
 	
 	if (g_iShowSprite[iClient] > 0)
 		AddMenuItem(menu, "0", "Disable Sprite", ITEMDRAW_DEFAULT);
@@ -314,7 +362,7 @@ public Action:Panel_SpriteControl(iClient)
 	decl String:szItem[16];
 	for (new i = 0; i < gTotalSpriteFiles; i++)
 	{
-//		Format(szItem, sizeof(szItem), "%i", i+1);	//need to offset the menu items by one since we added the enable / disable outside of the loop
+		//need to offset the menu items by one since we added the enable / disable outside of the loop
 		IntToString(i+1, szItem, sizeof(szItem));
 
 		GetArrayString(g_SpriteNameList, i, sTemp, sizeof(sTemp));
@@ -325,7 +373,7 @@ public Action:Panel_SpriteControl(iClient)
 		}
 		else
 		{
-			AddMenuItem(menu, szItem, sTemp,ITEMDRAW_DISABLED);
+			AddMenuItem(menu, szItem, sTemp, ITEMDRAW_DISABLED);
 		}
 		
 		#if defined DEBUG
@@ -357,16 +405,28 @@ public SpriteControlSelected(Handle:menu, MenuAction:action, param1, param2)
 }
 
 
-stock CreateSprite(iClient, String:sprite[], Float:offset)
+stock CreateSprite(iClient)
 {
-	new String:szTemp[64];
-	
-	Format(szTemp, sizeof(szTemp), "client%i", iClient);
-	DispatchKeyValue(iClient, "targetname", szTemp);
+	// Get sprite filename
+	decl String:szBuffer[128];
+	decl String:sTemp[128];
+	GetArrayString(g_SpritePathList, g_iShowSprite[iClient]-1, sTemp, sizeof(sTemp));
+	FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
 
+	// Set offset
 	new Float:vOrigin[3];
-	GetClientAbsOrigin(iClient, vOrigin);
-	vOrigin[2] += offset;
+//	GetClientAbsOrigin(iClient, vOrigin);
+	GetClientEyePosition(iClient, vOrigin);
+	vOrigin[2] += 25.0;
+//	vOrigin[0] += GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]-1);
+//	vOrigin[1] += GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]-1);
+//	vOrigin[2] += GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]-1);
+	
+	#if defined DEBUG
+		PrintToServer ("%s DEBUG - created sprite #%d:%s at offset X%1.1f, Y%1.1f, Z%1.1f (X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, g_iShowSprite[iClient]-1, szBuffer, GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]-1), GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]-1), GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]-1), vOrigin[0], vOrigin[1], vOrigin[2]);
+	#endif
+
+	// Create sprite
 	new ent = CreateEntityByName(SPRITE_ENTITYNAME);
 	
 	if (IsValidEntity(ent))
@@ -375,14 +435,12 @@ stock CreateSprite(iClient, String:sprite[], Float:offset)
 
 		if(GetEntityCount() < GetMaxEntities()-32)
 		{
-			DispatchKeyValue(ent, "model", sprite);
+			DispatchKeyValue(ent, "model", szBuffer);
 			DispatchKeyValue(ent, "classname", SPRITE_ENTITYNAME);
 			DispatchKeyValue(ent, "spawnflags", "1");
 			DispatchKeyValue(ent, "scale", "0.1");
 			DispatchKeyValue(ent, "rendermode", "1");
 			DispatchKeyValue(ent, "rendercolor", "255 255 255");
-//			DispatchKeyValue(ent, "targetname", SPRITE_TARGETNAME);
-//			DispatchKeyValue(ent, "parentname", szTemp);
 			DispatchSpawn(ent);
 			
 			TeleportEntity(ent, vOrigin, NULL_VECTOR, NULL_VECTOR);
@@ -450,8 +508,13 @@ public OnGameFrame()
 		{
 			ent = EntRefToEntIndex(g_SpriteEntityReference[i]);
 			
+			// get player position and add offset
 			GetClientEyePosition(i, vOrigin);
 			vOrigin[2] += 25.0;
+//			vOrigin[0] += GetArrayCell(g_SpriteXOffset, g_iShowSprite[i]-1);
+//			vOrigin[1] += GetArrayCell(g_SpriteYOffset, g_iShowSprite[i]-1);
+//			vOrigin[2] += GetArrayCell(g_SpriteZOffset, g_iShowSprite[i]-1);
+			
 			GetEntDataVector(i, gVelocityOffset, vVelocity);
 			TeleportEntity(ent, vOrigin, NULL_VECTOR, vVelocity);				
 			
