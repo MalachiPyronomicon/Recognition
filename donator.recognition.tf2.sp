@@ -27,6 +27,7 @@
 * 0.5.21 - use config (keyvalues) file to load sprite info
 * 0.5.22 - bug: didnt clear arrays
 * 0.5.23 - include offsets, add error handling to kv file read
+* 0.5.24 - fix offset math, better error handling, minor fixes
 *
 */
 
@@ -46,7 +47,7 @@
 //#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.23"
+#define PLUGIN_INFO_VERSION					"0.5.24"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -320,21 +321,31 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 		// Weed out dead donators
 		if (!IsPlayerAlive(i)) continue;
 
+		// Did donator choose disabled?
 		if (g_iShowSprite[i] > 0)
 		{
 			if (g_iShowSprite[i] >= gTotalSpriteFiles)
 			{
-				LogError ("%s ERROR - Sprite index out of bounds.", PLUGIN_PRINT_NAME);
+				LogError ("%s ERROR - Sprite index out of bounds: fixing.", PLUGIN_PRINT_NAME);
+				g_iShowSprite[i] = 1;
 			}
 			else
 			{
 				CreateSprite(i);
+				
+				// Give player health boost
+				SetEntityHealth(i, DONATOR_HEALTH_BOOST);
+
+				// Show choice
+				decl String:sTemp[128];
+				GetArrayString(g_SpriteNameList, g_iShowSprite[i], sTemp, sizeof(sTemp));
+				PrintToChat (i, "%s %s.", PLUGIN_PRINT_NAME, sTemp);
 			}
 		}
-		
-		// Give player health boost
-		SetEntityHealth(i, DONATOR_HEALTH_BOOST);
-		
+		else
+		{
+			PrintToChat (i, "%s Disabled.", PLUGIN_PRINT_NAME);
+		}
 	}
 	g_bRoundEnded = true;
 }
@@ -360,12 +371,12 @@ public Action:Panel_SpriteControl(iClient)
 {
 	decl String:sTemp[128];
 	new Handle:menu = CreateMenu(SpriteControlSelected);
-	SetMenuTitle(menu,"Donator: Above-head Icon:");
+	SetMenuTitle(menu,"Above-head Icon:");
 	
 	if (g_iShowSprite[iClient] > 0)
-		AddMenuItem(menu, "0", "Disable Sprite", ITEMDRAW_DEFAULT);
+		AddMenuItem(menu, "0", "--Disabled--", ITEMDRAW_DEFAULT);
 	else
-		AddMenuItem(menu, "0", "Disable Sprite", ITEMDRAW_DISABLED);
+		AddMenuItem(menu, "0", "--Disabled--", ITEMDRAW_DISABLED);
 	
 	decl String:szItem[16];
 	for (new i = 1; i < gTotalSpriteFiles; i++)
@@ -431,9 +442,10 @@ stock CreateSprite(iClient)
 		PrintToServer ("%s DEBUG - at offset:   + Array(X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]));
 	#endif
 
-	vOrigin[0] = FloatAdd(GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), vOrigin[0]);
-	vOrigin[1] = FloatAdd(GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), vOrigin[1]);
-	vOrigin[2] = FloatAdd(GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]), vOrigin[2]);
+	// Add in sprite offset
+	vOrigin[0] += Float:GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]);
+	vOrigin[1] += Float:GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]);
+	vOrigin[2] += Float:GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]);
 
 	#if defined DEBUG
 		PrintToServer ("%s DEBUG - at offset: = VOrigin(X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, vOrigin[0], vOrigin[1], vOrigin[2]);
@@ -524,9 +536,11 @@ public OnGameFrame()
 			
 			// get player position and add offset
 			GetClientEyePosition(iClient, vOrigin);
-			vOrigin[0] = FloatAdd(GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), vOrigin[0]);
-			vOrigin[1] = FloatAdd(GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), vOrigin[1]);
-			vOrigin[2] = FloatAdd(GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]), vOrigin[2]);
+
+			// Add in sprite offset
+			vOrigin[0] += Float:GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]);
+			vOrigin[1] += Float:GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]);
+			vOrigin[2] += Float:GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]);
 			
 			GetEntDataVector(iClient, gVelocityOffset, vVelocity);
 			TeleportEntity(iEntity, vOrigin, NULL_VECTOR, vVelocity);				
