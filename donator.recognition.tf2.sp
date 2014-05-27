@@ -43,10 +43,10 @@
 
 // DEFINES
 //uncomment to enable DEBUG messages
-#define DEBUG
+//#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.23r"
+#define PLUGIN_INFO_VERSION					"0.5.23"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -139,7 +139,7 @@ public OnPluginStart()
 public OnAllPluginsLoaded()
 {
 	if(!LibraryExists("donator.core"))
-		SetFailState("Unabled to find plugin: Basic Donator Interface");
+		SetFailState("Unable to find plugin: Basic Donator Interface");
 
 	Donator_RegisterMenuItem(MENUTEXT_DONATOR_SPRITE, SpriteControlCallback);
 }
@@ -156,7 +156,15 @@ public OnMapStart()
 	ClearArray(g_SpriteXOffset);
 	ClearArray(g_SpriteYOffset);
 	ClearArray(g_SpriteZOffset);
-	
+
+	// Index 0 (Disabled) should never be used - push dummy values
+	PushArrayString(g_SpriteNameList, "");
+	PushArrayString(g_SpritePathList, "");
+	PushArrayCell(g_SpriteXOffset, 0.0);
+	PushArrayCell(g_SpriteYOffset, 0.0);
+	PushArrayCell(g_SpriteZOffset, 0.0);
+	gTotalSpriteFiles++;
+
 	new Handle:kvSprites = CreateKeyValues(KVFILE_SPRITES_ROOT_NAME);
 	FileToKeyValues(kvSprites, g_sSpritesPath);
 
@@ -314,7 +322,7 @@ public hook_Win(Handle:event, const String:name[], bool:dontBroadcast)
 
 		if (g_iShowSprite[i] > 0)
 		{
-			if (g_iShowSprite[i] > gTotalSpriteFiles)
+			if (g_iShowSprite[i] >= gTotalSpriteFiles)
 			{
 				LogError ("%s ERROR - Sprite index out of bounds.", PLUGIN_PRINT_NAME);
 			}
@@ -360,14 +368,14 @@ public Action:Panel_SpriteControl(iClient)
 		AddMenuItem(menu, "0", "Disable Sprite", ITEMDRAW_DISABLED);
 	
 	decl String:szItem[16];
-	for (new i = 0; i < gTotalSpriteFiles; i++)
+	for (new i = 1; i < gTotalSpriteFiles; i++)
 	{
 		//need to offset the menu items by one since we added the enable / disable outside of the loop
-		IntToString(i+1, szItem, sizeof(szItem));
+		IntToString(i, szItem, sizeof(szItem));
 
 		GetArrayString(g_SpriteNameList, i, sTemp, sizeof(sTemp));
 
-		if (g_iShowSprite[iClient]-1 != i)
+		if (g_iShowSprite[iClient] != i)
 		{
 			AddMenuItem(menu, szItem, sTemp, ITEMDRAW_DEFAULT);
 		}
@@ -410,20 +418,25 @@ stock CreateSprite(iClient)
 	// Get sprite filename
 	decl String:szBuffer[128];
 	decl String:sTemp[128];
-	GetArrayString(g_SpritePathList, g_iShowSprite[iClient]-1, sTemp, sizeof(sTemp));
+	GetArrayString(g_SpritePathList, g_iShowSprite[iClient], sTemp, sizeof(sTemp));
 	FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
 
 	// Set offset
 	new Float:vOrigin[3];
-//	GetClientAbsOrigin(iClient, vOrigin);
 	GetClientEyePosition(iClient, vOrigin);
-	vOrigin[2] += 25.0;
-//	vOrigin[0] += GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]-1);
-//	vOrigin[1] += GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]-1);
-//	vOrigin[2] += GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]-1);
 	
 	#if defined DEBUG
-		PrintToServer ("%s DEBUG - created sprite #%d:%s at offset X%1.1f, Y%1.1f, Z%1.1f (X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, g_iShowSprite[iClient]-1, szBuffer, GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]-1), GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]-1), GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]-1), vOrigin[0], vOrigin[1], vOrigin[2]);
+		PrintToServer ("%s DEBUG - created sprite #%d:%s", PLUGIN_PRINT_NAME, g_iShowSprite[iClient], szBuffer);
+		PrintToServer ("%s DEBUG - at offset:   VOrigin(X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, vOrigin[0], vOrigin[1], vOrigin[2]);
+		PrintToServer ("%s DEBUG - at offset:   + Array(X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]));
+	#endif
+
+	vOrigin[0] = FloatAdd(GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), vOrigin[0]);
+	vOrigin[1] = FloatAdd(GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), vOrigin[1]);
+	vOrigin[2] = FloatAdd(GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]), vOrigin[2]);
+
+	#if defined DEBUG
+		PrintToServer ("%s DEBUG - at offset: = VOrigin(X%1.1f, Y%1.1f, Z%1.1f)", PLUGIN_PRINT_NAME, vOrigin[0], vOrigin[1], vOrigin[2]);
 	#endif
 
 	// Create sprite
@@ -491,35 +504,35 @@ public OnGameFrame()
 		return;
 	}
 	
-	new ent = INVALID_ENT_REFERENCE;
+	new iEntity = INVALID_ENT_REFERENCE;
 	new Float:vOrigin[3];
 	new Float:vVelocity[3];
 	
 	// For each player slot
 	// Start at 1 to skip console
-	for(new i = 1; i <= MaxClients; i++)
+	for(new iClient = 1; iClient <= MaxClients; iClient++)
 	{
-		if (!IsClientInGame(i))
+		if (!IsClientInGame(iClient))
 		{
 			continue;
 		}
 		
-		if (g_SpriteEntityReference[i] != INVALID_ENT_REFERENCE)
+		if (g_SpriteEntityReference[iClient] != INVALID_ENT_REFERENCE)
 		{
-			ent = EntRefToEntIndex(g_SpriteEntityReference[i]);
+			iEntity = INVALID_ENT_REFERENCE;
+			iEntity = EntRefToEntIndex(g_SpriteEntityReference[iClient]);
 			
 			// get player position and add offset
-			GetClientEyePosition(i, vOrigin);
-			vOrigin[2] += 25.0;
-//			vOrigin[0] += GetArrayCell(g_SpriteXOffset, g_iShowSprite[i]-1);
-//			vOrigin[1] += GetArrayCell(g_SpriteYOffset, g_iShowSprite[i]-1);
-//			vOrigin[2] += GetArrayCell(g_SpriteZOffset, g_iShowSprite[i]-1);
+			GetClientEyePosition(iClient, vOrigin);
+			vOrigin[0] = FloatAdd(GetArrayCell(g_SpriteXOffset, g_iShowSprite[iClient]), vOrigin[0]);
+			vOrigin[1] = FloatAdd(GetArrayCell(g_SpriteYOffset, g_iShowSprite[iClient]), vOrigin[1]);
+			vOrigin[2] = FloatAdd(GetArrayCell(g_SpriteZOffset, g_iShowSprite[iClient]), vOrigin[2]);
 			
-			GetEntDataVector(i, gVelocityOffset, vVelocity);
-			TeleportEntity(ent, vOrigin, NULL_VECTOR, vVelocity);				
+			GetEntDataVector(iClient, gVelocityOffset, vVelocity);
+			TeleportEntity(iEntity, vOrigin, NULL_VECTOR, vVelocity);				
 			
 			// Buff player speed
-			SetEntPropFloat(i, Prop_Data, "m_flMaxspeed", 400.0);
+			SetEntPropFloat(iClient, Prop_Data, "m_flMaxspeed", 400.0);
 		}
 	}
 }
