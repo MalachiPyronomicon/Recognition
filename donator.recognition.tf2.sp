@@ -28,7 +28,7 @@
 * 0.5.22 - bug: didnt clear arrays
 * 0.5.23 - include offsets, add error handling to kv file read
 * 0.5.24 - fix offset math, better error handling, minor fixes
-* 0.5.30 - use FNM to download files
+* 0.5.30 - use FNM to download files - some clients still crash?
 *
 */
 
@@ -49,7 +49,7 @@
 //#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.30d"
+#define PLUGIN_INFO_VERSION					"0.5.30"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
