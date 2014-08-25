@@ -28,6 +28,7 @@
 * 0.5.22 - bug: didnt clear arrays
 * 0.5.23 - include offsets, add error handling to kv file read
 * 0.5.24 - fix offset math, better error handling, minor fixes
+* 0.5.30 - use FNM to download files
 *
 */
 
@@ -38,6 +39,7 @@
 #include <tf2>
 #include <donator>
 #include <clientprefs>
+#include <filenetmessages>					// FNM_SendFile
 
 #pragma semicolon 1
 
@@ -47,7 +49,7 @@
 //#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.24"
+#define PLUGIN_INFO_VERSION					"0.5.30d"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -264,7 +266,51 @@ public OnMapEnd()
 
 public OnPostDonatorCheck(iClient)
 {
-	new String:szBuffer[256];
+	new String:szBuffer[128];
+	decl String:iClientName[MAX_NAME_LENGTH];
+	new ErrorCount = 0;
+
+	if ( !GetClientName(iClient, iClientName, sizeof(iClientName)) )
+		Format(iClientName, sizeof(iClientName), "Console");
+
+	// Add sprites to downloads
+	decl String:sTemp[128];
+	
+	for(new i = 1; i < gTotalSpriteFiles; i++)
+	{
+		GetArrayString(g_SpritePathList, i, sTemp, sizeof(sTemp));
+		FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
+		if ( FNM_SendFile(iClient, szBuffer) )
+		{
+			PrintToServer("%s FNM_Send_File: Success, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
+		}
+		else
+		{
+			PrintToServer("%s FNM_Send_File: Failed, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
+			ErrorCount++;
+		}
+		
+		FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sTemp);
+		if ( FNM_SendFile(iClient, szBuffer) )
+		{
+			PrintToServer("%s FNM_Send_File: Success, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
+		}
+		else
+		{
+			PrintToServer("%s FNM_Send_File: Failed, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
+			ErrorCount++;
+		}
+		
+	}
+
+	if (ErrorCount)
+	{
+		PrintToChat (iClient, "%s \x07FF0000CRASH WARNING", PLUGIN_PRINT_NAME);
+		PrintToChat (iClient, "ERROR: A file failed to download.");
+		PrintToChat (iClient, "Please change your options to allow downloads:");
+		PrintToChat (iClient, "Options -> Multiplayer -> Custom Content -> Allow");
+	}
+
 
 	if (!IsPlayerDonator(iClient))
 	{
@@ -272,6 +318,7 @@ public OnPostDonatorCheck(iClient)
 	}
 	else
 	{	
+		strcopy(szBuffer, sizeof(szBuffer), "");
 		g_bIsDonator[iClient] = true;
 		
 		// Only used if cookie not already set
