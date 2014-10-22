@@ -29,6 +29,7 @@
 * 0.5.23 - include offsets, add error handling to kv file read
 * 0.5.24 - fix offset math, better error handling, minor fixes
 * 0.5.30 - use FNM to download files - some clients still crash?
+* 0.5.31 - only use FNM to download files to clients that have d/l filter enabled
 *
 */
 
@@ -49,7 +50,7 @@
 //#define DEBUG
 
 // Plugin Info
-#define PLUGIN_INFO_VERSION					"0.5.30"
+#define PLUGIN_INFO_VERSION					"0.5.31"
 #define PLUGIN_INFO_NAME					"Donator Recognition"
 #define PLUGIN_INFO_AUTHOR					"Nut / Malachi"
 #define PLUGIN_INFO_DESCRIPTION				"Give donators after-round above-head icons (sprites)."
@@ -68,6 +69,8 @@
 
 #define COOKIENAME_SPRITE					"donator_spriteshow"
 #define COOKIENAME_SPRITE_DESCRIPTION		"Which donator sprite to show."
+
+#define CLIENT_CONVAR_DOWNLOADFILTER		"cl_downloadfilter"						// (def=all, none, nosounds, mapsonly)
 
 // KeyValues
 #define PATH_KVFILE_SPRITES					"configs/donator/donator.recognition.tf2.cfg"
@@ -266,51 +269,9 @@ public OnMapEnd()
 
 public OnPostDonatorCheck(iClient)
 {
+	QueryClientConVar(iClient, CLIENT_CONVAR_DOWNLOADFILTER, ClientConVarCallback);
+
 	new String:szBuffer[128];
-	decl String:iClientName[MAX_NAME_LENGTH];
-	new ErrorCount = 0;
-
-	if ( !GetClientName(iClient, iClientName, sizeof(iClientName)) )
-		Format(iClientName, sizeof(iClientName), "Console");
-
-	// Add sprites to downloads
-	decl String:sTemp[128];
-	
-	for(new i = 1; i < gTotalSpriteFiles; i++)
-	{
-		GetArrayString(g_SpritePathList, i, sTemp, sizeof(sTemp));
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
-		if ( FNM_SendFile(iClient, szBuffer) )
-		{
-			PrintToServer("%s FNM_Send_File: Success, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
-		}
-		else
-		{
-			PrintToServer("%s FNM_Send_File: Failed, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
-			ErrorCount++;
-		}
-		
-		FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sTemp);
-		if ( FNM_SendFile(iClient, szBuffer) )
-		{
-			PrintToServer("%s FNM_Send_File: Success, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
-		}
-		else
-		{
-			PrintToServer("%s FNM_Send_File: Failed, %s:%s", PLUGIN_PRINT_NAME, iClientName, szBuffer);
-			ErrorCount++;
-		}
-		
-	}
-
-	if (ErrorCount)
-	{
-		PrintToChat (iClient, "%s \x07FF0000CRASH WARNING", PLUGIN_PRINT_NAME);
-		PrintToChat (iClient, "ERROR: A file failed to download.");
-		PrintToChat (iClient, "Please change your options to allow downloads:");
-		PrintToChat (iClient, "Options -> Multiplayer -> Custom Content -> Allow");
-	}
-
 
 	if (!IsPlayerDonator(iClient))
 	{
@@ -332,6 +293,10 @@ public OnPostDonatorCheck(iClient)
 			{
 				g_iShowSprite[iClient] = StringToInt(szBuffer);
 			}
+		}
+		else
+		{
+			LogError("Client cookies still not cached for %s.", iClient);
 		}
 	}
 	
@@ -598,3 +563,128 @@ public OnGameFrame()
 	}
 }
 
+
+public ClientConVarCallback(QueryCookie:cookie, iClient, ConVarQueryResult:result, const String:cvarName[], const String:cvarValue[])
+{
+	decl String:iClientName[MAX_NAME_LENGTH];
+	new bool:bPerformFNMDownload = false;
+
+	if ( !iClient || !IsClientConnected(iClient) || IsFakeClient(iClient) )
+		return;
+	
+	if ( !GetClientName(iClient, iClientName, sizeof(iClientName)) )
+		Format(iClientName, sizeof(iClientName), "Console");
+	
+	if(result == ConVarQuery_Okay)
+	{
+		if ( !strcmp(cvarValue, "none", true) || !strcmp(cvarValue, "mapsonly", true) )
+		{
+			PrintToServer("%s %s: %s=%s", PLUGIN_PRINT_NAME, iClientName, cvarName, cvarValue);
+			bPerformFNMDownload = true;
+		}
+		else
+		if ( !strcmp(cvarValue, "all", true) || !strcmp(cvarValue, "nosounds", true) )
+		{
+			PrintToServer("%s %s: %s=%s", PLUGIN_PRINT_NAME, iClientName, cvarName, cvarValue);
+		}
+		else
+		{
+			PrintToServer("%s %s: %s=VALUE UNKNOWN", PLUGIN_PRINT_NAME, iClientName, cvarName, cvarValue);
+			bPerformFNMDownload = true;
+		}
+	}
+	else
+	{
+		bPerformFNMDownload = true;
+
+		if(result == ConVarQuery_NotFound)
+		{
+			PrintToServer("%s %s: %s=ConVarQuery_NotFound", PLUGIN_PRINT_NAME, iClientName, cvarName);
+		}
+		else
+		if(result == ConVarQuery_NotValid)
+		{
+			PrintToServer("%s %s: %s=ConVarQuery_NotValid", PLUGIN_PRINT_NAME, iClientName, cvarName);
+		}
+		else
+		if(result == ConVarQuery_Protected)
+		{
+			PrintToServer("%s %s: %s=ConVarQuery_Protected", PLUGIN_PRINT_NAME, iClientName, cvarName);
+		}
+		else
+		{
+			PrintToServer("%s %s: %s=QUERY INDETERMINATE", PLUGIN_PRINT_NAME, iClientName, cvarName);
+		}
+	}
+	
+	if (bPerformFNMDownload)
+	{
+		new String:szBuffer[128];
+		new ErrorCount = 0;
+		new SuccessCount = 0;
+
+		if ( !GetClientName(iClient, iClientName, sizeof(iClientName)) )
+			Format(iClientName, sizeof(iClientName), "Console");
+
+		// Add sprites to downloads
+		decl String:sTemp[128];
+		
+		for(new i = 1; i < gTotalSpriteFiles; i++)
+		{
+			GetArrayString(g_SpritePathList, i, sTemp, sizeof(sTemp));
+			FormatEx(szBuffer, sizeof(szBuffer), "%s.vmt", sTemp);
+			if ( FNM_SendFile(iClient, szBuffer) )
+			{
+				SuccessCount++;
+			}
+			else
+			{
+				ErrorCount++;
+			}
+			
+			FormatEx(szBuffer, sizeof(szBuffer), "%s.vtf", sTemp);
+			if ( FNM_SendFile(iClient, szBuffer) )
+			{
+				SuccessCount++;
+			}
+			else
+			{
+				ErrorCount++;
+			}
+			
+		}
+
+		PrintToServer("%s FNM_Send_File: Client=%s, Success=%d, Errors=%d", PLUGIN_PRINT_NAME, iClientName, SuccessCount, ErrorCount);
+		
+		if (ErrorCount)
+		{
+			PrintToChat (iClient, "%s \x07FF0000CRASH WARNING", PLUGIN_PRINT_NAME);
+			PrintToChat (iClient, "\x07FF0000Please change your options to allow downloads:");
+			PrintToChat (iClient, "\x07FF0000Options -> Multiplayer -> Custom Content -> Allow");
+		}
+		
+		// loop through all players to find admins and print only to them
+		for (new iAdm = 1; iAdm <= MaxClients; iAdm++)
+		{
+			if (IsClientInGame(iAdm))
+			{
+				// print only to admins
+				if (GetUserAdmin(iAdm) != INVALID_ADMIN_ID)
+				{
+					if (!ErrorCount)
+					{
+						PrintToChat(iAdm, "\x04(ADMINS) \x01Used FNM to send files to %s", iClientName);
+					}
+					else
+					{
+						PrintToChat(iAdm, "%s \x07FF0000CRASH WARNING", PLUGIN_PRINT_NAME);
+						PrintToChat(iAdm, "\x07FF0000Please have %s change their options to allow downloads:", iClientName);
+						PrintToChat(iAdm, "\x07FF0000Options -> Multiplayer -> Custom Content -> Allow");
+					}
+				}	
+			}
+		}
+		
+	}
+	
+}
